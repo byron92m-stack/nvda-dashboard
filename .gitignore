@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Large SEC caches (regenerate with fetch_sec_nvda.py --refresh)
+data/nvda_companyfacts.json
+data/nvda_submissions.json
+data/index_*.json
+data/nvda_10k_*.xml
+
+# Optional local override; keep the default EntityPublicFloat behavior
+data/nvda_market_cap.csv
