@@ -34,7 +34,7 @@ def parse_price(raw: str) -> float:
 def parse_date(timestamp: str) -> str:
     match = re.search(r"([A-Z][a-z]{2}) (\d{1,2}), (\d{4})", timestamp)
     if not match:
-        return date.today().isoformat()
+        raise SystemExit(f"Unrecognised Nasdaq timestamp: {timestamp!r}")
     month, day, year = match.groups()
     return date(int(year), MONTHS[month], int(day)).isoformat()
 

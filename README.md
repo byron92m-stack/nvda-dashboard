@@ -244,6 +244,9 @@ the source; otherwise the script uses `EntityPublicFloat (SEC, fiscal Q2 end)`.
 - Cost of debt: interest expense / average debt × (1 − 21%)
 - Weights: market capitalization and financial debt
 
+The WACC weights use `EntityPublicFloat` (or the optional market-cap CSV); the Valuation tab uses
+the current market price. At NVIDIA's debt level the difference is immaterial (D/V below 1%).
+
 ### EVA and ROIC
 
 - `NOPAT = EBIT × (1 − 21%)`
@@ -493,6 +496,8 @@ repository root.
   dependency changes the HTML hash and may change chart rendering.
 - The valuation uses the committed `data/nvda_price.csv` (2026-10-27 close). Refresh it manually
   with `fetch_nvda_price.py`; the dashboard does not fetch live prices at render time.
+- `fetch_nvda_price.py` fails loudly if Nasdaq changes its timestamp format; update the parser if
+  that happens rather than silently stamping today's date.
 - Relative multiples are reference ranges, not live peer medians. The DCF is deliberately
   conservative and highly sensitive to WACC, terminal growth and margin assumptions.
 - The dashboard is an analytical tool, **not investment advice**.

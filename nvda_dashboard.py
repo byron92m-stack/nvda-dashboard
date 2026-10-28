@@ -809,8 +809,9 @@ f.add_trace(
         base=val_lows,
         orientation="h",
         marker_color=[NV_GRAY, NV_BLUE, NV_GREEN, NV_DARK],
-        text=[f"${low:,.0f}–${high:,.0f}" for low, high in zip(val_lows, val_highs)],
+        text=[f"${low:,.2f}–${high:,.2f}" for low, high in zip(val_lows, val_highs)],
         textposition="inside",
+        textfont=dict(color="white", size=11),
         name="Valuation range",
     )
 )
@@ -832,7 +833,10 @@ if current_price is not None:
         annotation_position="top",
     )
 f.update_layout(**base_layout("12. Valuation — Football Field (USD per share)", height=420))
-f.update_xaxes(tickprefix="$", range=[0, max(val_highs) * 1.15])
+f.update_xaxes(
+    tickprefix="$",
+    range=[min(val_lows) * 0.85, max(val_highs) * 1.08],
+)
 figs["chart12"] = f
 
 # ---------- Tablas ----------
@@ -842,8 +846,8 @@ def tabla(headers, rows, table_id):
         "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows
     )
     return (
-        f'<table id="{table_id}" class="data-table"><thead><tr>{th}</tr></thead>'
-        f"<tbody>{trs}</tbody></table>"
+        f'<div class="table-wrap"><table id="{table_id}" class="data-table">'
+        f"<thead><tr>{th}</tr></thead><tbody>{trs}</tbody></table></div>"
     )
 
 
@@ -1307,6 +1311,7 @@ header p { margin: 6px 0 0; opacity: 0.9; font-size: 14px; }
 .card { background: white; border-radius: 10px; padding: 14px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
 h2 { color: #1b5e20; font-size: 20px; margin: 28px 0 12px; border-bottom: 2px solid #c8e6c9; padding-bottom: 6px; }
 h3 { color: #2e7d32; font-size: 16px; margin: 18px 0 8px; }
+.table-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.08); margin-bottom: 18px; }
 table.data-table th { background: #1b5e20; color: white; padding: 10px 8px; text-align: left; font-weight: 600; }
 table.data-table td { padding: 8px; border-bottom: 1px solid #eceff1; }
@@ -1471,7 +1476,7 @@ body = f"""
 <!-- TAB: WACC -->
 <div id="tab-wacc" class="tab-content">
   <h2>WACC and EVA (FY2022–FY2026)</h2>
-  <div class="note"><b>Parameters:</b> Rf 4.5% · Market risk premium 5.5% · Beta 1.7 · Ke = 4.5% + 1.7 × 5.5% = 13.85% · Tax rate 21% · Kd = interest expense / average debt × (1 − 21%). Market capitalization: {escape(str(market_cap_source))}.</div>
+  <div class="note"><b>Parameters:</b> Rf 4.5% · Market risk premium 5.5% · Beta 1.7 · Ke = 4.5% + 1.7 × 5.5% = 13.85% · Tax rate 21% · Kd = interest expense / average debt × (1 − 21%). Market capitalization: {escape(str(market_cap_source))}. The WACC weights use {fmt_b(market_value[-1])} (the source shown here); the Valuation tab uses the current price ({fmt_b(current_market_cap)}). The difference is immaterial at NVIDIA's debt level (D/V below 1%).</div>
   {tabla_wacc}
   {tabla_eva}
   <div class="card"><div id="chart4b"></div></div>
