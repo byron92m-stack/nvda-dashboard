@@ -8,6 +8,7 @@ Uso:
 from __future__ import annotations
 
 import json
+from html import escape
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -81,6 +82,10 @@ def fmt_m(v, paren: bool = False, dec: int = 0) -> str:
 
 def fmt_pct(v, dec: int = 1) -> str:
     return "—" if v is None else f"{v:,.{dec}f}%"
+
+
+def fmt_signed(v, dec: int = 1, suffix: str = "") -> str:
+    return "—" if v is None else f"{v:+.{dec}f}{suffix}"
 
 
 def fmt_x(v, dec: int = 2) -> str:
@@ -196,11 +201,11 @@ kd_pct: list[float | None] = []
 for i in range(N):
     e = market_value[i]
     d = total_debt[i]
-    if e is None or d is None:
+    if e is None or d is None or interest[i] is None or avg_debt[i] is None:
         wacc.append(None)
         kd_pct.append(None)
         continue
-    kd = (interest[i] or 0) / avg_debt[i] * (1 - TAX) if avg_debt[i] else 0.0
+    kd = interest[i] / avg_debt[i] * (1 - TAX) if avg_debt[i] else 0.0
     kd_pct.append(kd * 100)
     v = e + d
     wacc.append(((e / v) * KE + (d / v) * kd) * 100 if v else KE * 100)
@@ -808,9 +813,9 @@ tabla_eva = tabla(eva_headers, eva_rows, "tabla-eva")
 risk_headers = ["Risk", "Probability", "Impact", "Level", "Evidence"]
 risk_rows = [
     ["Data Center concentration", "High", "High", "🔴 Critical", f"Data Center = {fmt_pct(dc_share[-1])} of FY2026 revenue"],
-    ["Customer concentration", "High", "High", "🔴 Critical", "Two direct customers = 22% + 14% of FY2026 revenue"],
+    ["Customer concentration", "High", "High", "🔴 Critical", "Two direct customers = 22% + 14% of FY2026 revenue (10-K)"],
     ["Supplier concentration", "High", "Very High", "🔴 Critical", "Manufacturing dependent on TSMC; HBM and CoWoS"],
-    ["Export controls / China", "High", "High", "🔴 Critical", "31% of revenue outside the US; advanced-chip restrictions"],
+    ["Export controls / China", "High", "High", "🔴 Critical", "31% of revenue outside the US (10-K); advanced-chip restrictions"],
     ["AI capex cyclicality", "Medium", "Very High", "🟠 High", f"FY2026 growth {fmt_pct(rev_growth[-1])}, tied to hyperscalers"],
     ["Competition (AMD, ASICs, Intel)", "High", "Medium", "🟠 High", "High margins attract competition"],
     ["Valuation and expectations", "Medium", "High", "🟠 High", f"P/E {fmt_x(pe[-1], 1)}; market cap {fmt_b(market_value[-1])}"],
@@ -984,7 +989,9 @@ li { margin: 4px 0; }
 
 PLOTLY_JS = get_plotlyjs()
 
-warnings_html = "".join(f"<li>{w}</li>" for w in D["validation"].get("warnings", []))
+warnings_html = "".join(
+    f"<li>{escape(str(w))}</li>" for w in D["validation"].get("warnings", [])
+)
 validation_banner = ""
 if not D["validation"].get("ok", True):
     validation_banner = (
@@ -993,7 +1000,7 @@ if not D["validation"].get("ok", True):
     )
 data_notes = (
     '<div class="note"><b>Notas de datos:</b><ul>'
-    + (warnings_html or "<li>Sin advertencias.</li>")
+    + (warnings_html or "<li>No warnings.</li>")
     + "</ul></div>"
 )
 
@@ -1004,7 +1011,7 @@ head = f"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dashboard Financiero — NVIDIA Corporation (NVDA)</title>
 <script>__PLOTLY_JS__</script>
-<style>{CSS}</style>
+<style>__CSS__</style>
 </head>
 <body>
 <header>
@@ -1014,12 +1021,12 @@ head = f"""<!DOCTYPE html>
 <div class="container">
 {validation_banner}
 <div class="kpi-grid">
-  <div class="kpi"><div class="label">Ingresos FY2026</div><div class="value">{fmt_b(rev26)}</div><div class="delta">{rev_growth_26:+.1f}% vs FY2025</div></div>
-  <div class="kpi green"><div class="label">Ganancia Neta FY2026</div><div class="value">{fmt_b(net26)}</div><div class="delta">{net_growth_26:+.1f}% vs FY2025</div></div>
+  <div class="kpi"><div class="label">Ingresos FY2026</div><div class="value">{fmt_b(rev26)}</div><div class="delta">{fmt_signed(rev_growth_26, 1, "%")} vs FY2025</div></div>
+  <div class="kpi green"><div class="label">Ganancia Neta FY2026</div><div class="value">{fmt_b(net26)}</div><div class="delta">{fmt_signed(net_growth_26, 1, "%")} vs FY2025</div></div>
   <div class="kpi green"><div class="label">Margen Bruto</div><div class="value">{fmt_pct(gm26)}</div><div class="delta">Margen operativo {fmt_pct(op_margin[-1])}</div></div>
   <div class="kpi green"><div class="label">ROE</div><div class="value">{fmt_pct(roe26)}</div><div class="delta">ROIC {fmt_pct(roic[-1])}</div></div>
   <div class="kpi green"><div class="label">Deuda / EBITDA</div><div class="value">{fmt_x(debt_ebitda26)}</div><div class="delta">Caja neta {fmt_b(net_cash26)}</div></div>
-  <div class="kpi green"><div class="label">EVA FY2026</div><div class="value">{fmt_b(eva26)}</div><div class="delta">Spread ROIC−WACC {spread26:+.1f} pp</div></div>
+  <div class="kpi green"><div class="label">EVA FY2026</div><div class="value">{fmt_b(eva26)}</div><div class="delta">Spread ROIC−WACC {fmt_signed(spread26, 1, " pp")}</div></div>
   <div class="kpi orange"><div class="label">Data Center</div><div class="value">{fmt_pct(dc_share26)}</div><div class="delta">del total de ingresos</div></div>
   <div class="kpi orange"><div class="label">P/E</div><div class="value">{fmt_x(pe[-1], 1)}</div><div class="delta">Capitalización {fmt_b(market_value[-1])}</div></div>
 </div>
@@ -1037,10 +1044,14 @@ head = f"""<!DOCTYPE html>
 </div>
 """
 
-head = translate(head).replace("__PLOTLY_JS__", PLOTLY_JS)
+head = (
+    translate(head)
+    .replace("__PLOTLY_JS__", PLOTLY_JS)
+    .replace("__CSS__", CSS)
+)
 
 body = f"""
-<!-- TAB: RESUMEN -->
+<!-- TAB: OVERVIEW -->
 <div id="tab-resumen" class="tab-content active">
   <h2>Resumen Ejecutivo — Gráficos Principales</h2>
   <div class="grid2">
@@ -1054,7 +1065,7 @@ body = f"""
   <div class="ok"><b>Executive read:</b> NVDA grew from {fmt_b(revenue[0])} to {fmt_b(rev26)} in revenue (CAGR {fmt_pct(cagr_rev)}), with a gross margin of {fmt_pct(gm26)} and ROIC of {fmt_pct(roic[-1])} versus a WACC of {fmt_pct(wacc[-1])}. It generates an EVA of {fmt_b(eva26)} and has net cash of {fmt_b(net_cash26)}. The main risk is concentration: Data Center already represents {fmt_pct(dc_share26)} of revenue.</div>
 </div>
 
-<!-- TAB: ESTADOS -->
+<!-- TAB: FINANCIAL STATEMENTS -->
 <div id="tab-estados" class="tab-content">
   <h2>Estado de Resultados (USD millones)</h2>
   {tabla_er}
@@ -1064,7 +1075,7 @@ body = f"""
   <div class="note"><b>Methodology notes:</b> FY = NVIDIA fiscal year (ends in late January). Figures are in USD millions. "Other non-current assets" includes operating leases, deferred tax, non-marketable equity investments and other assets. The FY2026 "Marketable securities" line uses the issuer-specific XBRL tag (MarketableSecuritiesAndEquitySecuritiesFVNI). Shares and EPS are normalized for the 10:1 split in June 2024.</div>
 </div>
 
-<!-- TAB: FLUJO -->
+<!-- TAB: CASH FLOW -->
 <div id="tab-flujo" class="tab-content">
   <h2>Flujo de Efectivo (Método Indirecto)</h2>
   <div class="card"><div id="chart9"></div></div>
@@ -1097,7 +1108,7 @@ body = f"""
   <div class="note">Las referencias son orientativas para una empresa de semiconductores asset-light; no sustituyen un análisis de comparables.</div>
 </div>
 
-<!-- TAB: SEGMENTOS -->
+<!-- TAB: SEGMENTS -->
 <div id="tab-segmentos" class="tab-content">
   <h2>Ingresos por Mercado (USD millones)</h2>
   <div class="card"><div id="chart11"></div></div>
@@ -1109,7 +1120,7 @@ body = f"""
     <li><b>Data Center:</b> grew from {fmt_pct(dc_share[0])} of revenue in FY2022 to {fmt_pct(dc_share[-1])} in FY2026. It is the growth engine and the main source of concentration.</li>
     <li><b>Gaming:</b> grew in absolute terms but lost relative weight (from {fmt_pct(pct(segments['Gaming'][0], revenue[0]))} to {fmt_pct(pct(segments['Gaming'][-1], revenue[-1]))}).</li>
     <li><b>Automotive and ProViz:</b> small but growing markets; they are the natural diversification path.</li>
-    <li><b>Risk:</b> a fall in AI infrastructure spending would directly affect 89.7% of the business.</li>
+    <li><b>Risk:</b> a fall in AI infrastructure spending would directly affect {fmt_pct(dc_share[-1])} of the business.</li>
   </ul>
   <div class="alert"><b>Conclusion:</b> Data Center concentration explains current profitability and, at the same time, NVDA's central strategic risk.</div>
 </div>
@@ -1117,7 +1128,7 @@ body = f"""
 <!-- TAB: WACC -->
 <div id="tab-wacc" class="tab-content">
   <h2>WACC and EVA (FY2022–FY2026)</h2>
-  <div class="note"><b>Parameters:</b> Rf 4.5% · Market risk premium 5.5% · Beta 1.7 · Ke = 4.5% + 1.7 × 5.5% = 13.85% · Tax rate 21% · Kd = interest expense / average debt × (1 − 21%). Market capitalization: {market_cap_source}.</div>
+  <div class="note"><b>Parameters:</b> Rf 4.5% · Market risk premium 5.5% · Beta 1.7 · Ke = 4.5% + 1.7 × 5.5% = 13.85% · Tax rate 21% · Kd = interest expense / average debt × (1 − 21%). Market capitalization: {escape(str(market_cap_source))}.</div>
   {tabla_wacc}
   {tabla_eva}
   <div class="card"><div id="chart4b"></div></div>
@@ -1125,7 +1136,7 @@ body = f"""
   <div class="note"><b>Note:</b> EVA uses invested capital = equity + debt − cash and marketable securities. Market capitalization comes from the SEC's EntityPublicFloat (end of the second fiscal quarter); if you add data/nvda_market_cap.csv with fiscal_year,market_cap_usd, the script uses exact market capitalization.</div>
 </div>
 
-<!-- TAB: RIESGOS -->
+<!-- TAB: RISKS -->
 <div id="tab-riesgos" class="tab-content">
   <h2>Matriz de Riesgos Financieros y Estratégicos</h2>
   {tabla_riesgos}
@@ -1143,7 +1154,7 @@ body = f"""
   <div class="note">Altman Z is calibrated for manufacturers; NVDA is asset-light and its market cap is far above book value, so the market-based Z is not very informative. The book-equity Z is shown as a conservative reference.</div>
 </div>
 
-<!-- TAB: PROYECCIÓN -->
+<!-- TAB: FORECAST -->
 <div id="tab-proyeccion" class="tab-content">
   <h2>FY2027 Forecast — Base Case</h2>
   <div class="card"><div id="chart10"></div></div>
@@ -1172,12 +1183,12 @@ body = f"""
   <div class="note">Illustrative forecast, not analyst consensus. Adjust the assumptions in <code>nvda_dashboard.py</code> (G_REV, GM_TARGET, OPEX_GROWTH, etc.).</div>
 </div>
 
-<!-- TAB: CONCLUSIONES -->
+<!-- TAB: CONCLUSIONS -->
 <div id="tab-conclusiones" class="tab-content">
   <h2>Conclusions</h2>
   {tabla_conc}
   <div class="ok">
-    <b>Verdict:</b> NVIDIA is the opposite of Danec: it creates economic value on a massive scale, has net cash and extraordinary margins. Its risk is not solvency but Data Center concentration, dependence on TSMC/HBM, export controls and sensitivity to the AI capex cycle.
+    <b>Verdict:</b> NVIDIA creates economic value on a massive scale, with net cash and extraordinary margins. Its risk is not solvency but Data Center concentration, dependence on TSMC/HBM, export controls and sensitivity to the AI capex cycle.
   </div>
   <h2>Prioritized recommendations</h2>
   {tabla_rec}
@@ -1185,7 +1196,7 @@ body = f"""
   {tabla_trend}
 </div>
 </div>
-<footer>Dashboard generated with Python + Plotly · Data: SEC XBRL (companyfacts + 10-K) · NVIDIA Corporation (NVDA) · FY2022–FY2026 · Self-contained HTML</footer>
+<footer>Independent analysis for educational purposes; not investment advice. Generated with Python + Plotly · Data: SEC XBRL (companyfacts + 10-K) · NVIDIA Corporation (NVDA) · FY2022–FY2026 · Self-contained HTML</footer>
 """
 
 body = translate(body)

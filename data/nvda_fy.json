@@ -433,6 +433,16 @@
         "detail": "other balance sheet items"
       },
       {
+        "name": "financial debt present",
+        "ok": true,
+        "detail": "current and non-current debt tags"
+      },
+      {
+        "name": "interest expense present",
+        "ok": true,
+        "detail": "interest expense tag"
+      },
+      {
         "name": "segments sum to revenue",
         "ok": true,
         "detail": "tolerance USD 1M"

@@ -57,7 +57,9 @@ These values come from the FY2026 10-K and are recalculated every time the dashb
 - **Market capitalization:** `dei:EntityPublicFloat` from the SEC by default. This is the market
   value of the public float at the end of the **second fiscal quarter**, not at fiscal year-end.
   For a company with marginal debt like NVIDIA, the effect on WACC is negligible (D/V below 1%).
-  An optional CSV can override it with exact market capitalization (see below).
+  If the accession match is unavailable, the script falls back to the 10-K public-float fact
+  nearest to the fiscal year-end (within 220 days). An optional CSV can override it with exact
+  market capitalization (see below).
 
 ### Fiscal years
 
@@ -80,7 +82,7 @@ nvda-dashboard/
 ├── fetch_sec_nvda.py       Download and normalize SEC XBRL data
 ├── nvda_dashboard.py       Build the self-contained HTML dashboard
 ├── translations.py         Spanish-to-English map for the rendered UI
-├── requirements.txt        Python dependency: plotly
+├── requirements.txt        Plotly 7.1.0 (pinned)
 ├── data/
 │   ├── nvda_fy.json        Normalized five-year dataset (committed)
 │   ├── nvda_companyfacts.json   Cached companyfacts API (ignored)
@@ -94,8 +96,9 @@ nvda-dashboard/
 └── README.md
 ```
 
-`fetch_sec_nvda.py` and `nvda_dashboard.py` only need the Python standard library plus **Plotly**.
-The downloader itself uses `urllib` and `xml.etree.ElementTree`; no `requests` or `pandas` required.
+`fetch_sec_nvda.py` and `nvda_dashboard.py` only need the Python standard library plus **Plotly
+7.1.0** (pinned for reproducible HTML). The downloader itself uses `urllib` and
+`xml.etree.ElementTree`; no `requests` or `pandas` required.
 
 ---
 
@@ -189,8 +192,9 @@ FY2025,3000000000000
 FY2026,4500000000000
 ```
 
-If the file exists, the script uses it and reports `CSV` as the source. Otherwise it uses
-`EntityPublicFloat (SEC, fiscal Q2 end)`.
+The CSV must contain **all five fiscal years**. A partial file is rejected with a clear error, so
+the script can never silently mix CSV and SEC values. If the file exists, it is used and reported as
+the source; otherwise the script uses `EntityPublicFloat (SEC, fiscal Q2 end)`.
 
 ---
 
@@ -271,7 +275,7 @@ other scenarios.
 
 ## Validation
 
-`fetch_sec_nvda.py` runs these checks before writing the dataset:
+`fetch_sec_nvda.py` runs these nine checks before writing the dataset:
 
 - Five complete fiscal years for the key series.
 - `Assets = Liabilities + Equity`.
@@ -279,6 +283,8 @@ other scenarios.
 - Segment revenue sums to total revenue.
 - `CFO + CFI + CFF = Change in cash`.
 - Other current and non-current assets are non-negative.
+- Financial debt tags (current and non-current) are present.
+- Interest expense is present.
 - Market capitalization is available.
 
 The result is stored in `data/nvda_fy.json` under `validation`:
@@ -421,7 +427,21 @@ repository root.
   fails visibly if they change.
 - `companyfacts` may contain restatements. The script picks the most recently filed 10-K value for
   each fiscal year-end.
+- Customer concentration (two customers = 22% + 14% of FY2026 revenue) and geographic revenue
+  (31% outside the US) come from the FY2026 10-K narrative, not from the XBRL companyfacts dataset.
+- Other current/non-current assets and liabilities are derived residuals. Individual component tags
+  (operating leases, deferred tax, non-marketable equity, etc.) are not separately validated, so a
+  mis-mapped component could be absorbed into “Other” rather than surfaced.
+- The embedded plotly.js version depends on the pinned Plotly version (`7.1.0`). Changing the
+  dependency changes the HTML hash and may change chart rendering.
 - The dashboard is an analytical tool, **not investment advice**.
+
+---
+
+## License
+
+No license has been selected yet. Add a `LICENSE` file before distributing the project if you want
+to grant reuse rights.
 
 ---
 

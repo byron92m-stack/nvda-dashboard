@@ -434,7 +434,8 @@ def main() -> int:
         for t, c, d in zip(total_liabilities, current_liabilities, debt_noncurrent)
     ]
     total_debt = [
-        (d or 0) + (dn or 0) for d, dn in zip(debt_current, debt_noncurrent)
+        (d + dn) if d is not None and dn is not None else None
+        for d, dn in zip(debt_current, debt_noncurrent)
     ]
 
     # ---------- Flujo de efectivo ----------
@@ -470,22 +471,36 @@ def main() -> int:
     accn_by_end = get_10k_accessions(submissions)
     public_float = get_public_float(dei, accn_by_end, display_ends)
     market_cap_csv = load_market_cap_csv(args.market_cap_csv)
+    if market_cap_csv:
+        missing_years = [year for year in years if year not in market_cap_csv]
+        if missing_years:
+            raise SystemExit(
+                "Market-cap CSV is missing fiscal years: "
+                + ", ".join(missing_years)
+                + ". Provide all five years or remove the file."
+            )
     market_cap = [
         market_cap_csv.get(year, pf) for year, pf in zip(years, public_float)
     ]
     market_cap_source = "CSV" if market_cap_csv else "EntityPublicFloat (SEC, fiscal Q2 end)"
 
     # ---------- Deuda promedio (necesita el año anterior) ----------
-    debt_by_end: dict[str, float] = {}
+    debt_by_end: dict[str, float | None] = {}
     for end in all_ends:
         dc, _ = pick_tag(gaap, ["LongTermDebtCurrent", "DebtCurrent"], end, False)
         dn, _ = pick_tag(gaap, ["LongTermDebtNoncurrent"], end, False)
-        debt_by_end[end] = (dc or 0) + (dn or 0)
+        debt_by_end[end] = (dc + dn) if dc is not None and dn is not None else None
     debt_average = []
     for end in display_ends:
         idx = all_ends.index(end)
         prior = all_ends[idx - 1] if idx > 0 else end
-        debt_average.append((debt_by_end.get(prior, 0) + debt_by_end.get(end, 0)) / 2)
+        prior_debt = debt_by_end.get(prior)
+        current_debt = debt_by_end.get(end)
+        debt_average.append(
+            (prior_debt + current_debt) / 2
+            if prior_debt is not None and current_debt is not None
+            else None
+        )
 
     # ---------- Segmentos por mercado ----------
     log("Downloading 10-K XBRL instances for segment data…")
@@ -573,6 +588,13 @@ def main() -> int:
 
     other_ok = all((v is None or v >= 0) for v in other_current + other_noncurrent)
     check("other assets non-negative", other_ok, "other balance sheet items")
+
+    debt_ok = all(v is not None for v in debt_current) and all(
+        v is not None for v in debt_noncurrent
+    )
+    interest_ok = all(v is not None for v in interest)
+    check("financial debt present", debt_ok, "current and non-current debt tags")
+    check("interest expense present", interest_ok, "interest expense tag")
 
     segment_ok = True
     for i, year in enumerate(years):

@@ -308,8 +308,6 @@ TRANSLATIONS = [
     ("Capital devuelto", "Capital returned"),
     ("Riesgo estratégico, no de solvencia", "Strategic risk, not solvency risk"),
     ("Veredicto:", "Verdict:"),
-    ("NVIDIA es el caso opuesto al de Danec: crea valor económico de forma masiva, tiene caja neta y márgenes extraordinarios. Su riesgo no es la solvencia sino la concentración en Data Center, la dependencia de TSMC/HBM, los controles de exportación y la sensibilidad al ciclo de capex de IA.",
-     "NVIDIA is the opposite of Danec: it creates economic value on a massive scale, has net cash and extraordinary margins. Its risk is not solvency but Data Center concentration, dependence on TSMC/HBM, export controls and sensitivity to the AI capex cycle."),
     ("Recomendaciones priorizadas", "Prioritized recommendations"),
     ("Prioridad", "Priority"),
     ("Acción", "Action"),
@@ -403,8 +401,14 @@ TRANSLATIONS = [
 ]
 
 
+# Longest Spanish phrases must win over generic words. Sorting once at import
+# time makes the mapping order-insensitive and prevents partial replacements
+# such as "Caja neta (caja + inversiones - deuda)" -> "Net cash (caja...)".
+_SORTED_TRANSLATIONS = sorted(TRANSLATIONS, key=lambda item: len(item[0]), reverse=True)
+
+
 def translate(text: str) -> str:
-    for spanish, english in TRANSLATIONS:
+    for spanish, english in _SORTED_TRANSLATIONS:
         text = text.replace(spanish, english)
     return text
 
