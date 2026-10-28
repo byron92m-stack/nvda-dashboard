@@ -400,14 +400,32 @@ def main() -> int:
     ppe = build_series(gaap, ["PropertyPlantAndEquipmentNet"], display_ends, False)
     goodwill = build_series(gaap, ["Goodwill"], display_ends, False)
     intangibles = build_series(gaap, ["IntangibleAssetsNetExcludingGoodwill"], display_ends, False)
-    other_noncurrent = build_series(gaap, ["OtherAssetsNoncurrent"], display_ends, False)
+    other_assets_tag = build_series(gaap, ["OtherAssetsNoncurrent"], display_ends, False)
+    operating_lease_assets = build_series(
+        gaap, ["OperatingLeaseRightOfUseAsset"], display_ends, False
+    )
+    deferred_tax_assets = build_series(
+        gaap, ["DeferredIncomeTaxAssetsNet"], display_ends, False
+    )
+    non_marketable_equity = build_series(
+        gaap,
+        [
+            "EquitySecuritiesWithoutReadilyDeterminableFairValueAmount",
+            "EquitySecuritiesFVNINoncurrent",
+        ],
+        display_ends,
+        False,
+    )
     total_assets = build_series(gaap, ["Assets"], display_ends, False)
     ap = build_series(gaap, ["AccountsPayableCurrent"], display_ends, False)
     accrued = build_series(gaap, ["AccruedLiabilitiesCurrent"], display_ends, False)
     debt_current = build_series(gaap, ["LongTermDebtCurrent", "DebtCurrent"], display_ends, False)
     current_liabilities = build_series(gaap, ["LiabilitiesCurrent"], display_ends, False)
     debt_noncurrent = build_series(gaap, ["LongTermDebtNoncurrent"], display_ends, False)
-    other_noncurrent_liab = build_series(gaap, ["OtherLiabilitiesNoncurrent"], display_ends, False)
+    operating_lease_liab = build_series(
+        gaap, ["OperatingLeaseLiabilityNoncurrent"], display_ends, False
+    )
+    other_liab_tag = build_series(gaap, ["OtherLiabilitiesNoncurrent"], display_ends, False)
     total_liabilities = build_series(gaap, ["Liabilities"], display_ends, False)
     equity = build_series(gaap, ["StockholdersEquity"], display_ends, False)
     retained = build_series(gaap, ["RetainedEarningsAccumulatedDeficit"], display_ends, False)
@@ -589,6 +607,70 @@ def main() -> int:
     other_ok = all((v is None or v >= 0) for v in other_current + other_noncurrent)
     check("other assets non-negative", other_ok, "other balance sheet items")
 
+    component_treatment: list[str] = []
+    component_ok = True
+    for i, year in enumerate(years):
+        known = (
+            (operating_lease_assets[i] or 0)
+            + (deferred_tax_assets[i] or 0)
+            + (other_assets_tag[i] or 0)
+        )
+        non_marketable = non_marketable_equity[i] or 0
+        derived = other_noncurrent[i]
+        if derived is None:
+            component_treatment.append("missing")
+            component_ok = False
+            warnings.append(f"{year}: other non-current assets are missing")
+        elif abs(known - derived) <= 1e6:
+            component_treatment.append("included")
+        elif abs(known + non_marketable - derived) <= 1e6:
+            component_treatment.append("separate")
+        else:
+            component_treatment.append("mismatch")
+            component_ok = False
+            warnings.append(
+                f"{year}: other non-current assets do not reconcile "
+                f"(components {known / 1e9:.2f} B, derived {derived / 1e9:.2f} B)"
+            )
+    check(
+        "non-current asset components reconcile",
+        component_ok,
+        "operating lease + deferred tax + other assets",
+    )
+
+    current_liab_ok = all(
+        ap[i] is not None
+        and accrued[i] is not None
+        and debt_current[i] is not None
+        and current_liabilities[i] is not None
+        and abs((ap[i] + accrued[i] + debt_current[i]) - current_liabilities[i]) <= 1e6
+        for i in range(len(years))
+    )
+    check(
+        "current liabilities reconcile",
+        current_liab_ok,
+        "accounts payable + accrued liabilities + current debt",
+    )
+
+    noncurrent_liab_ok = all(
+        debt_noncurrent[i] is not None
+        and operating_lease_liab[i] is not None
+        and other_liab_tag[i] is not None
+        and total_liabilities[i] is not None
+        and current_liabilities[i] is not None
+        and abs(
+            (debt_noncurrent[i] + operating_lease_liab[i] + other_liab_tag[i])
+            - (total_liabilities[i] - current_liabilities[i])
+        )
+        <= 1e6
+        for i in range(len(years))
+    )
+    check(
+        "non-current liability components reconcile",
+        noncurrent_liab_ok,
+        "debt + operating lease + other long-term liabilities",
+    )
+
     debt_ok = all(v is not None for v in debt_current) and all(
         v is not None for v in debt_noncurrent
     )
@@ -693,6 +775,15 @@ def main() -> int:
             "total_liabilities": series(total_liabilities),
             "equity": series(equity),
             "retained_earnings": series(retained),
+        },
+        "balance_components": {
+            "operating_lease_assets": series(operating_lease_assets),
+            "deferred_tax_assets": series(deferred_tax_assets),
+            "non_marketable_equity": series(non_marketable_equity),
+            "other_assets": series(other_assets_tag),
+            "non_marketable_equity_treatment": component_treatment,
+            "operating_lease_liabilities": series(operating_lease_liab),
+            "other_liabilities_noncurrent": series(other_liab_tag),
         },
         "cashflow": {
             "cfo": series(cfo),

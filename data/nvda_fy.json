@@ -268,6 +268,57 @@
       146973000000
     ]
   },
+  "balance_components": {
+    "operating_lease_assets": [
+      829000000,
+      1038000000,
+      1346000000,
+      1793000000,
+      2867000000
+    ],
+    "deferred_tax_assets": [
+      1222000000,
+      3396000000,
+      6081000000,
+      10979000000,
+      13258000000
+    ],
+    "non_marketable_equity": [
+      null,
+      288000000,
+      1321000000,
+      3387000000,
+      22251000000
+    ],
+    "other_assets": [
+      3841000000,
+      3820000000,
+      4500000000,
+      3038000000,
+      8301000000
+    ],
+    "non_marketable_equity_treatment": [
+      "included",
+      "included",
+      "included",
+      "separate",
+      "separate"
+    ],
+    "operating_lease_liabilities": [
+      741000000,
+      902000000,
+      1119000000,
+      1519000000,
+      2572000000
+    ],
+    "other_liabilities_noncurrent": [
+      1553000000,
+      1913000000,
+      2541000000,
+      4245000000,
+      7306000000
+    ]
+  },
   "cashflow": {
     "cfo": [
       9108000000,
@@ -431,6 +482,21 @@
         "name": "other assets non-negative",
         "ok": true,
         "detail": "other balance sheet items"
+      },
+      {
+        "name": "non-current asset components reconcile",
+        "ok": true,
+        "detail": "operating lease + deferred tax + other assets"
+      },
+      {
+        "name": "current liabilities reconcile",
+        "ok": true,
+        "detail": "accounts payable + accrued liabilities + current debt"
+      },
+      {
+        "name": "non-current liability components reconcile",
+        "ok": true,
+        "detail": "debt + operating lease + other long-term liabilities"
       },
       {
         "name": "financial debt present",

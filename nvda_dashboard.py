@@ -7,6 +7,7 @@ Uso:
 
 from __future__ import annotations
 
+import csv
 import json
 from html import escape
 from pathlib import Path
@@ -19,6 +20,7 @@ from translations import translate, translate_obj
 
 ROOT = Path(__file__).resolve().parent
 DATA_PATH = ROOT / "data" / "nvda_fy.json"
+PRICE_PATH = ROOT / "data" / "nvda_price.csv"
 OUT_PATH = ROOT / "nvda_dashboard.html"
 
 if not DATA_PATH.exists():
@@ -112,6 +114,10 @@ def fmt_b(v) -> str:
     return f"${v / 1e9:,.1f}B"
 
 
+def fmt_price(v) -> str:
+    return "—" if v is None else f"${v:,.2f}"
+
+
 # ---------- Datos base ----------
 revenue = arr("income", "revenue")
 cogs = arr("income", "cost_of_revenue")
@@ -148,6 +154,17 @@ other_ncl = arr("balance", "other_noncurrent_liabilities")
 total_liabilities = arr("balance", "total_liabilities")
 equity = arr("balance", "equity")
 retained = arr("balance", "retained_earnings")
+
+components = D.get("balance_components", {})
+operating_lease_assets = components.get("operating_lease_assets", [None] * N)
+deferred_tax_assets = components.get("deferred_tax_assets", [None] * N)
+non_marketable_equity = components.get("non_marketable_equity", [None] * N)
+other_assets_tag = components.get("other_assets", [None] * N)
+component_treatment = components.get(
+    "non_marketable_equity_treatment", ["included"] * N
+)
+operating_lease_liab = components.get("operating_lease_liabilities", [None] * N)
+other_liab_tag = components.get("other_liabilities_noncurrent", [None] * N)
 
 cfo = arr("cashflow", "cfo")
 capex = arr("cashflow", "capex")
@@ -190,11 +207,54 @@ fcf = [safe_sub(o, c) for o, c in zip(cfo, capex)]
 market_value = [m if m is not None else e for m, e in zip(market_cap, equity)]
 avg_debt = [d if d is not None else t for d, t in zip(debt_average, total_debt)]
 
+# ---------- Market price ----------
+current_price = None
+price_date = ""
+price_source = ""
+if PRICE_PATH.exists():
+    with PRICE_PATH.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle), None)
+    if row and row.get("price"):
+        try:
+            current_price = float(row["price"])
+            price_date = row.get("as_of", "")
+            price_source = row.get("source", "CSV")
+        except ValueError:
+            current_price = None
+if current_price is None:
+    current_price = safe_div(market_value[-1], shares_diluted[-1])
+    price_date = "implied"
+    price_source = "EntityPublicFloat / diluted shares (stale)"
+current_market_cap = (
+    current_price * shares_diluted[-1]
+    if current_price is not None and shares_diluted[-1]
+    else None
+)
+
 nopat = [e * (1 - TAX) if e is not None else None for e in ebit]
 invested_capital = [
     safe_sub(safe_add(e, d), c) for e, d, c in zip(equity, total_debt, cash_sec)
 ]
 roic = [pct(n, ic) for n, ic in zip(nopat, invested_capital)]
+
+component_sum = []
+for i in range(N):
+    total = (
+        (operating_lease_assets[i] or 0)
+        + (deferred_tax_assets[i] or 0)
+        + (other_assets_tag[i] or 0)
+    )
+    if component_treatment[i] == "separate":
+        total += non_marketable_equity[i] or 0
+    component_sum.append(total if other_nca[i] is not None else None)
+
+noncurrent_liabilities = [
+    safe_sub(t, c) for t, c in zip(total_liabilities, current_liabilities)
+]
+component_liab_sum = [
+    safe_add(safe_add(d, o), l)
+    for d, o, l in zip(debt_ncur, operating_lease_liab, other_liab_tag)
+]
 
 wacc: list[float | None] = []
 kd_pct: list[float | None] = []
@@ -280,6 +340,120 @@ ev_ebitda = [
     safe_div(safe_sub(safe_add(m, d), cs), e)
     for m, d, cs, e in zip(market_value, total_debt, cash_sec, ebitda)
 ]
+
+# ---------- Valuation ----------
+pe_current = safe_div(current_price, eps[-1])
+ev_current = safe_add(safe_sub(current_market_cap, cash_sec[-1]), total_debt[-1])
+ev_ebitda_current = safe_div(ev_current, ebitda[-1])
+p_fcf_current = safe_div(current_market_cap, fcf[-1])
+fcf_yield_current = pct(fcf[-1], current_market_cap)
+ev_sales_current = safe_div(ev_current, revenue[-1])
+
+PE_MULTIPLES = [30, 35, 40, 45, 50]
+pe_values = [m * eps[-1] for m in PE_MULTIPLES]
+EV_MULTIPLES = [25, 30, 35, 40, 45]
+ev_values = [
+    (m * ebitda[-1] - total_debt[-1] + cash_sec[-1]) / shares_diluted[-1]
+    for m in EV_MULTIPLES
+]
+PFCF_MULTIPLES = [35, 40, 45, 50, 55]
+pfcf_values = [m * fcf[-1] / shares_diluted[-1] for m in PFCF_MULTIPLES]
+
+fair_low = min(pe_values[1], ev_values[1])
+fair_high = max(pe_values[3], ev_values[3])
+fair_base = (pe_values[2] + ev_values[2]) / 2
+
+
+def valuation_verdict(price, base, low, high):
+    if price is None or base is None or low is None or high is None:
+        return "—"
+    if price > high:
+        return "Overvalued"
+    if price > base:
+        return "Modestly overvalued"
+    if price < low:
+        return "Undervalued"
+    if price < base:
+        return "Modestly undervalued"
+    return "Fairly valued"
+
+
+verdict = valuation_verdict(current_price, fair_base, fair_low, fair_high)
+upside_base = pct(fair_base - current_price, current_price) if current_price else None
+upside_low = pct(fair_low - current_price, current_price) if current_price else None
+upside_high = pct(fair_high - current_price, current_price) if current_price else None
+
+DCF_GROWTH = [0.18, 0.15, 0.12, 0.10, 0.08, 0.06, 0.05, 0.04, 0.035, 0.03]
+DCF_MARGINS = [0.58, 0.56, 0.55, 0.54, 0.53, 0.52, 0.51, 0.50, 0.50, 0.50]
+DCF_SCENARIOS = {
+    "Bear": dict(
+        growth=[0.15, 0.10, 0.08, 0.06, 0.04, 0.03, 0.025, 0.02, 0.02, 0.02],
+        margins=[0.55, 0.52, 0.50, 0.48, 0.46, 0.45, 0.44, 0.43, 0.42, 0.42],
+        wacc=0.145,
+        g=0.025,
+    ),
+    "Base": dict(growth=DCF_GROWTH, margins=DCF_MARGINS, wacc=0.138, g=0.030),
+    "Bull": dict(
+        growth=[0.22, 0.20, 0.17, 0.14, 0.11, 0.08, 0.06, 0.05, 0.04, 0.03],
+        margins=[0.60, 0.59, 0.58, 0.57, 0.56, 0.55, 0.54, 0.53, 0.52, 0.52],
+        wacc=0.125,
+        g=0.035,
+    ),
+}
+
+
+def dcf_per_share(growth, margins, wacc, g):
+    if wacc <= g:
+        return float("inf")
+    rev = revenue[-1]
+    pv = 0.0
+    fcff = 0.0
+    for i, (growth_i, margin_i) in enumerate(zip(growth, margins), 1):
+        prev = rev
+        rev *= 1 + growth_i
+        nopat_i = rev * margin_i * (1 - TAX)
+        da_i = rev * 0.015
+        capex_i = rev * 0.03
+        dnwc_i = (rev - prev) * 0.12
+        fcff = nopat_i + da_i - capex_i - dnwc_i
+        pv += fcff / (1 + wacc) ** i
+    terminal = fcff * (1 + g) / (wacc - g)
+    pv += terminal / (1 + wacc) ** len(growth)
+    return (pv + net_cash[-1]) / shares_diluted[-1]
+
+
+dcf_values = {name: dcf_per_share(**params) for name, params in DCF_SCENARIOS.items()}
+dcf_bear = dcf_values["Bear"]
+dcf_base = dcf_values["Base"]
+dcf_bull = dcf_values["Bull"]
+
+
+def solve_terminal_growth(target, wacc):
+    # Gordon growth is only defined for g < WACC; the value goes to infinity
+    # as g approaches WACC, so the root always lies below this upper bound.
+    lo, hi = 0.0, wacc - 1e-4
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if dcf_per_share(DCF_GROWTH, DCF_MARGINS, wacc, mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2 * 100
+
+
+def solve_wacc(target, g):
+    lo, hi = 0.03, 0.25
+    for _ in range(80):
+        mid = (lo + hi) / 2
+        if dcf_per_share(DCF_GROWTH, DCF_MARGINS, mid, g) > target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2 * 100
+
+
+reverse_g = solve_terminal_growth(current_price, 0.138) if current_price else None
+reverse_wacc = solve_wacc(current_price, 0.03) if current_price else None
 
 # ---------- Proyección FY2027 ----------
 G_REV = 0.18
@@ -623,6 +797,44 @@ f.update_yaxes(title_text="Ingresos (USD B)", secondary_y=False, tickprefix="$",
 f.update_yaxes(title_text="Data Center (%)", secondary_y=True, ticksuffix="%")
 figs["chart11"] = f
 
+# 12. Valuation football field
+val_labels = ["DCF bear–bull", "P/E 35–45x", "EV/EBITDA 30–40x", "Fair value range"]
+val_lows = [dcf_bear, pe_values[1], ev_values[1], fair_low]
+val_highs = [dcf_bull, pe_values[3], ev_values[3], fair_high]
+f = go.Figure()
+f.add_trace(
+    go.Bar(
+        y=val_labels,
+        x=[high - low for low, high in zip(val_lows, val_highs)],
+        base=val_lows,
+        orientation="h",
+        marker_color=[NV_GRAY, NV_BLUE, NV_GREEN, NV_DARK],
+        text=[f"${low:,.0f}–${high:,.0f}" for low, high in zip(val_lows, val_highs)],
+        textposition="inside",
+        name="Valuation range",
+    )
+)
+f.add_trace(
+    go.Scatter(
+        x=[fair_base],
+        y=["Fair value range"],
+        mode="markers",
+        marker=dict(symbol="diamond", size=14, color=NV_DARK),
+        name="Fair value base",
+    )
+)
+if current_price is not None:
+    f.add_vline(
+        x=current_price,
+        line_dash="dash",
+        line_color=NV_RED,
+        annotation_text=f"Current ${current_price:,.2f}",
+        annotation_position="top",
+    )
+f.update_layout(**base_layout("12. Valuation — Football Field (USD per share)", height=420))
+f.update_xaxes(tickprefix="$", range=[0, max(val_highs) * 1.15])
+figs["chart12"] = f
+
 # ---------- Tablas ----------
 def tabla(headers, rows, table_id):
     th = "".join(f"<th>{h}</th>" for h in headers)
@@ -680,6 +892,47 @@ bg_rows = [
     ["Caja neta (caja + inversiones - deuda)", *[fmt_m(v) for v in net_cash]],
 ]
 tabla_bg = tabla(bg_headers, bg_rows, "tabla-bg")
+
+
+def component_check(a, b):
+    if a is None or b is None:
+        return "—"
+    return "OK" if abs(a - b) <= 1e6 else "FAIL"
+
+
+TREATMENT_LABELS = {
+    "included": "Included in Other assets",
+    "separate": "Separate line",
+    "missing": "—",
+    "mismatch": "FAIL",
+}
+comp_rows = [
+    ["Operating lease assets", *[fmt_m(v) for v in operating_lease_assets]],
+    ["Deferred tax assets", *[fmt_m(v) for v in deferred_tax_assets]],
+    ["Non-marketable equity", *[fmt_m(v) for v in non_marketable_equity]],
+    ["Other assets", *[fmt_m(v) for v in other_assets_tag]],
+    ["Component sum", *[fmt_m(v) for v in component_sum]],
+    ["Reported other non-current assets", *[fmt_m(v) for v in other_nca]],
+    ["Treatment", *[TREATMENT_LABELS.get(t, "—") for t in component_treatment]],
+    ["Check", *[component_check(a, b) for a, b in zip(component_sum, other_nca)]],
+]
+tabla_comp = tabla(["Item", *YEARS], comp_rows, "tabla-comp")
+
+liab_comp_rows = [
+    ["Non-current debt", *[fmt_m(v) for v in debt_ncur]],
+    ["Operating lease liabilities", *[fmt_m(v) for v in operating_lease_liab]],
+    ["Other long-term liabilities", *[fmt_m(v) for v in other_liab_tag]],
+    ["Component sum", *[fmt_m(v) for v in component_liab_sum]],
+    ["Reported non-current liabilities", *[fmt_m(v) for v in noncurrent_liabilities]],
+    [
+        "Check",
+        *[
+            component_check(a, b)
+            for a, b in zip(component_liab_sum, noncurrent_liabilities)
+        ],
+    ],
+]
+tabla_liab_comp = tabla(["Item", *YEARS], liab_comp_rows, "tabla-liab-comp")
 
 fl_headers = ["Concepto", *YEARS]
 fl_rows = [
@@ -818,7 +1071,7 @@ risk_rows = [
     ["Export controls / China", "High", "High", "🔴 Critical", "31% of revenue outside the US (10-K); advanced-chip restrictions"],
     ["AI capex cyclicality", "Medium", "Very High", "🟠 High", f"FY2026 growth {fmt_pct(rev_growth[-1])}, tied to hyperscalers"],
     ["Competition (AMD, ASICs, Intel)", "High", "Medium", "🟠 High", "High margins attract competition"],
-    ["Valuation and expectations", "Medium", "High", "🟠 High", f"P/E {fmt_x(pe[-1], 1)}; market cap {fmt_b(market_value[-1])}"],
+    ["Valuation and expectations", "Medium", "High", "🟠 High", f"P/E {fmt_x(pe_current, 1)}; market cap {fmt_b(current_market_cap)}"],
     ["Inventory and commitments", "Medium", "Medium", "🟡 Moderate", f"DIO {fmt_days(dio[-1])} days; inventory {fmt_b(inventory[-1])}"],
     ["Taiwan geopolitics", "Medium", "Very High", "🔴 Critical", "Supply chain concentrated in Taiwan"],
     ["Roadmap execution", "Medium", "High", "🟠 High", "Blackwell/Rubin transition and supply capacity"],
@@ -887,6 +1140,90 @@ kpi_rows = [
     ["Capex / revenue", "≤10%", fmt_pct(pct(capex[-1], revenue[-1]))],
 ]
 tabla_kpi = tabla(kpi_headers, kpi_rows, "tabla-kpi")
+
+val_rows = [
+    ["Current price", f"{fmt_price(current_price)} ({price_date} · {price_source})"],
+    ["Fair value base", fmt_price(fair_base)],
+    ["Fair value range", f"{fmt_price(fair_low)} – {fmt_price(fair_high)}"],
+    ["Upside/downside vs base", fmt_signed(upside_base, 1, "%")],
+    ["P/E (FY2026)", fmt_x(pe_current, 1)],
+    ["EV/EBITDA (FY2026)", fmt_x(ev_ebitda_current, 1)],
+    ["P/FCF (FY2026)", fmt_x(p_fcf_current, 1)],
+    ["FCF yield", fmt_pct(fcf_yield_current)],
+    ["Verdict", verdict],
+]
+tabla_val = tabla(["Metric", "Value"], val_rows, "tabla-val")
+
+rel_rows = []
+for label, multiple, implied in [
+    ("P/E", 35, pe_values[1]),
+    ("P/E", 40, pe_values[2]),
+    ("P/E", 45, pe_values[3]),
+    ("EV/EBITDA", 30, ev_values[1]),
+    ("EV/EBITDA", 35, ev_values[2]),
+    ("EV/EBITDA", 40, ev_values[3]),
+    ("P/FCF", 40, pfcf_values[1]),
+    ("P/FCF", 45, pfcf_values[2]),
+    ("P/FCF", 50, pfcf_values[3]),
+]:
+    rel_rows.append(
+        [
+            label,
+            f"{multiple}x",
+            fmt_price(implied),
+            fmt_signed(pct(implied - current_price, current_price), 1, "%")
+            if current_price
+            else "—",
+        ]
+    )
+tabla_rel = tabla(
+    ["Method", "Multiple", "Implied price", "vs current"], rel_rows, "tabla-rel"
+)
+
+dcf_meta = {
+    "Bear": ("15% → 2%", "55% → 42%", 14.5, 2.5, dcf_bear),
+    "Base": ("18% → 3%", "58% → 50%", 13.8, 3.0, dcf_base),
+    "Bull": ("22% → 3%", "60% → 52%", 12.5, 3.5, dcf_bull),
+}
+dcf_rows = []
+for scenario, (growth_path, margin_path, wacc_value, terminal_g, value) in dcf_meta.items():
+    dcf_rows.append(
+        [
+            scenario,
+            growth_path,
+            margin_path,
+            f"{wacc_value:.1f}%",
+            f"{terminal_g:.1f}%",
+            fmt_price(value),
+            fmt_signed(pct(value - current_price, current_price), 1, "%")
+            if current_price
+            else "—",
+        ]
+    )
+tabla_dcf = tabla(
+    ["Scenario", "Growth path", "EBIT margin", "WACC", "Terminal g", "Value/share", "vs current"],
+    dcf_rows,
+    "tabla-dcf",
+)
+
+reverse_rows = [
+    [
+        "At 13.8% WACC",
+        fmt_pct(reverse_g),
+        "Terminal growth needed to justify the current price",
+    ],
+    [
+        "At 3.0% terminal growth",
+        fmt_pct(reverse_wacc),
+        "WACC needed to justify the current price",
+    ],
+    [
+        "Current price",
+        fmt_price(current_price),
+        f"As of {price_date} · {price_source}",
+    ],
+]
+tabla_reverse = tabla(["Check", "Value", "Interpretation"], reverse_rows, "tabla-reverse")
 
 conc_headers = ["#", "Finding", "Evidence"]
 conc_rows = [
@@ -1028,7 +1365,7 @@ head = f"""<!DOCTYPE html>
   <div class="kpi green"><div class="label">Deuda / EBITDA</div><div class="value">{fmt_x(debt_ebitda26)}</div><div class="delta">Caja neta {fmt_b(net_cash26)}</div></div>
   <div class="kpi green"><div class="label">EVA FY2026</div><div class="value">{fmt_b(eva26)}</div><div class="delta">Spread ROIC−WACC {fmt_signed(spread26, 1, " pp")}</div></div>
   <div class="kpi orange"><div class="label">Data Center</div><div class="value">{fmt_pct(dc_share26)}</div><div class="delta">del total de ingresos</div></div>
-  <div class="kpi orange"><div class="label">P/E</div><div class="value">{fmt_x(pe[-1], 1)}</div><div class="delta">Capitalización {fmt_b(market_value[-1])}</div></div>
+  <div class="kpi orange"><div class="label">P/E</div><div class="value">{fmt_x(pe_current, 1)}</div><div class="delta">Current market cap {fmt_b(current_market_cap)}</div></div>
 </div>
 
 <div class="tabs">
@@ -1038,6 +1375,7 @@ head = f"""<!DOCTYPE html>
   <button class="tab-btn" onclick="showTab('ratios', this)">📊 Ratios</button>
   <button class="tab-btn" onclick="showTab('segmentos', this)">🧩 Segmentos</button>
   <button class="tab-btn" onclick="showTab('wacc', this)">⚖️ WACC / EVA</button>
+  <button class="tab-btn" onclick="showTab('valoracion', this)">💰 Valuation</button>
   <button class="tab-btn" onclick="showTab('riesgos', this)">⚠️ Riesgos</button>
   <button class="tab-btn" onclick="showTab('proyeccion', this)">🔮 Proyección FY2027</button>
   <button class="tab-btn" onclick="showTab('conclusiones', this)">📌 Conclusiones</button>
@@ -1071,6 +1409,11 @@ body = f"""
   {tabla_er}
   <h2>Balance General (USD millones)</h2>
   {tabla_bg}
+  <h2>Balance Sheet Components (USD millions)</h2>
+  {tabla_comp}
+  <div class="note">Non-marketable equity is included in "Other assets" in FY2022–FY2024 and shown as a separate line in FY2025–FY2026. The component sum reconciles to "Other non-current assets" every year.</div>
+  <h2>Non-Current Liabilities Components (USD millions)</h2>
+  {tabla_liab_comp}
   {data_notes}
   <div class="note"><b>Methodology notes:</b> FY = NVIDIA fiscal year (ends in late January). Figures are in USD millions. "Other non-current assets" includes operating leases, deferred tax, non-marketable equity investments and other assets. The FY2026 "Marketable securities" line uses the issuer-specific XBRL tag (MarketableSecuritiesAndEquitySecuritiesFVNI). Shares and EPS are normalized for the 10:1 split in June 2024.</div>
 </div>
@@ -1136,6 +1479,28 @@ body = f"""
   <div class="note"><b>Note:</b> EVA uses invested capital = equity + debt − cash and marketable securities. Market capitalization comes from the SEC's EntityPublicFloat (end of the second fiscal quarter); if you add data/nvda_market_cap.csv with fiscal_year,market_cap_usd, the script uses exact market capitalization.</div>
 </div>
 
+<!-- TAB: VALUATION -->
+<div id="tab-valoracion" class="tab-content">
+  <h2>Valuation — Is NVDA Overvalued or Undervalued?</h2>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="label">Current Price</div><div class="value">{fmt_price(current_price)}</div><div class="delta">{price_date} · {price_source}</div></div>
+    <div class="kpi green"><div class="label">Fair Value Base</div><div class="value">{fmt_price(fair_base)}</div><div class="delta">Range {fmt_price(fair_low)} – {fmt_price(fair_high)}</div></div>
+    <div class="kpi orange"><div class="label">Verdict</div><div class="value">{verdict}</div><div class="delta">vs base {fmt_signed(upside_base, 1, "%")}</div></div>
+    <div class="kpi red"><div class="label">DCF Base</div><div class="value">{fmt_price(dcf_base)}</div><div class="delta">Conservative FCFF</div></div>
+  </div>
+  <div class="card"><div id="chart12"></div></div>
+  <h3>Valuation summary</h3>
+  {tabla_val}
+  <h3>Relative valuation</h3>
+  {tabla_rel}
+  <h3>DCF scenarios</h3>
+  {tabla_dcf}
+  <h3>Reverse DCF — what the current price implies</h3>
+  {tabla_reverse}
+  <div class="note"><b>How to read this:</b> the relative valuation is the primary range (35–45x P/E, 30–40x EV/EBITDA). The central fair value is {fmt_price(fair_base)}; the low end {fmt_price(fair_low)} is the margin-of-safety reference. The DCF is a conservative 10-year FCFF model with margin compression and a 13.8% WACC; it is a downside anchor, not the base target. The current price is at the top of the relative range and far above the DCF. To justify it at a 13.8% WACC, terminal growth would need to be about {fmt_pct(reverse_g)} forever, or the WACC would need to be about {fmt_pct(reverse_wacc)} at 3% terminal growth.</div>
+  <div class="alert"><b>Not investment advice.</b> This is an independent, model-based analysis for educational purposes. Valuations are highly sensitive to growth, margins, WACC and terminal assumptions. Do your own research.</div>
+</div>
+
 <!-- TAB: RISKS -->
 <div id="tab-riesgos" class="tab-content">
   <h2>Matriz de Riesgos Financieros y Estratégicos</h2>
@@ -1196,7 +1561,7 @@ body = f"""
   {tabla_trend}
 </div>
 </div>
-<footer>Independent analysis for educational purposes; not investment advice. Generated with Python + Plotly · Data: SEC XBRL (companyfacts + 10-K) · NVIDIA Corporation (NVDA) · FY2022–FY2026 · Self-contained HTML</footer>
+<footer>Independent analysis for educational purposes; not investment advice. Code MIT · Content CC BY 4.0 · Data: SEC XBRL (companyfacts + 10-K) · NVIDIA Corporation (NVDA) · FY2022–FY2026 · Self-contained HTML</footer>
 """
 
 body = translate(body)

@@ -12,22 +12,23 @@ or internet connection.
 
 ## What the dashboard includes
 
-Nine tabs and eleven unique charts (twelve Plotly containers, because the EVA chart appears in both
+Ten tabs and twelve unique charts (thirteen Plotly containers, because the EVA chart appears in both
 the Overview and WACC/EVA tabs):
 
 | Tab | Contents |
 |---|---|
 | **Overview** | Revenue vs net income, margins, debt vs equity vs cash, EVA and ROIC vs WACC |
-| **Financial Statements** | Five-year income statement and balance sheet |
+| **Financial Statements** | Five-year income statement, balance sheet, and validated non-current components |
 | **Cash Flow** | CFO, CFI, CFF, free cash flow, capex, buybacks and dividends |
 | **Ratios** | Liquidity, solvency, profitability and efficiency ratios |
 | **Segments** | Revenue by market: Data Center, Gaming, Professional Visualization, Automotive, OEM & Other |
 | **WACC / EVA** | Cost of capital, economic value added, ROIC and spread |
+| **Valuation** | Current price, fair value range, relative multiples, DCF scenarios and reverse DCF |
 | **Risks** | Financial and strategic risk matrix, mitigation plan, methodologies |
 | **FY2027 Forecast** | Base-case projection, sensitivity analysis and budget KPIs |
 | **Conclusions** | Findings, prioritized recommendations and trend summary |
 
-The HTML is **fully self-contained** (~4.9 MB): Plotly.js, CSS, data and JavaScript are embedded in
+The HTML is **fully self-contained** (~5 MB): Plotly.js, CSS, data and JavaScript are embedded in
 one file. It works offline and can be shared by email or WhatsApp.
 
 ### FY2026 snapshot
@@ -45,6 +46,23 @@ one file. It works offline and can be shared by email or WhatsApp.
 
 These values come from the FY2026 10-K and are recalculated every time the dashboard is generated.
 
+### Valuation snapshot (2026-10-27)
+
+| Metric | Value |
+|---|---:|
+| Current price (Nasdaq close) | $217.94 |
+| Fair value base | $194.21 |
+| Fair value range | $165.25–$220.50 |
+| Verdict | Modestly overvalued |
+| P/E (FY2026) | 44.5x |
+| EV/EBITDA (FY2026) | 39.7x |
+| P/FCF (FY2026) | 55.3x |
+| DCF base (conservative) | $52.22 |
+
+The dashboard reads `data/nvda_price.csv`. Refresh the price with
+`.venv/bin/python fetch_nvda_price.py`; the committed CSV keeps the HTML build offline and
+reproducible. The valuation is model-based, not investment advice.
+
 ---
 
 ## Data sources
@@ -60,6 +78,9 @@ These values come from the FY2026 10-K and are recalculated every time the dashb
   If the accession match is unavailable, the script falls back to the 10-K public-float fact
   nearest to the fiscal year-end (within 220 days). An optional CSV can override it with exact
   market capitalization (see below).
+- **Market price:** Nasdaq quote API (official close), saved to `data/nvda_price.csv` by
+  `fetch_nvda_price.py`. The dashboard reads the committed CSV, so the HTML build stays offline and
+  reproducible. The current snapshot uses the **2026-10-27 close of $217.94**.
 
 ### Fiscal years
 
@@ -80,17 +101,21 @@ NVIDIA's fiscal year ends in late January:
 ```
 nvda-dashboard/
 ├── fetch_sec_nvda.py       Download and normalize SEC XBRL data
+├── fetch_nvda_price.py     Fetch the Nasdaq close -> data/nvda_price.csv
 ├── nvda_dashboard.py       Build the self-contained HTML dashboard
 ├── translations.py         Spanish-to-English map for the rendered UI
 ├── requirements.txt        Plotly 7.1.0 (pinned)
 ├── data/
 │   ├── nvda_fy.json        Normalized five-year dataset (committed)
+│   ├── nvda_price.csv      Market price used by the valuation (committed)
 │   ├── nvda_companyfacts.json   Cached companyfacts API (ignored)
 │   ├── nvda_submissions.json    Cached SEC submissions (ignored)
 │   ├── nvda_10k_FY20xx.xml      Cached 10-K XBRL instances (ignored)
 │   └── index_FY20xx.json        Cached filing indexes (ignored)
 ├── nvda_dashboard.html     Generated dashboard (committed)
 ├── index.html              Redirect so the repository root opens the dashboard
+├── LICENSE                 MIT license for the code
+├── LICENSE-CONTENT.md      CC BY 4.0 for the dashboard and documentation
 ├── .nojekyll               Disable Jekyll processing on GitHub Pages
 ├── .gitignore
 └── README.md
@@ -138,7 +163,16 @@ but you should comply with the SEC policy.
 This downloads `companyfacts`, the submissions JSON and the five 10-K XBRL instances. The result is
 `data/nvda_fy.json`. The script validates accounting identities and prints a summary.
 
-### 5. Generate the dashboard
+### 5. Refresh the market price (optional)
+
+```bash
+.venv/bin/python fetch_nvda_price.py
+```
+
+This writes `data/nvda_price.csv` with the latest Nasdaq close. The repository already contains a
+committed snapshot, so this step is optional; the dashboard builds offline with the committed CSV.
+
+### 6. Generate the dashboard
 
 ```bash
 .venv/bin/python nvda_dashboard.py
@@ -146,7 +180,7 @@ This downloads `companyfacts`, the submissions JSON and the five 10-K XBRL insta
 
 Output: `nvda_dashboard.html`.
 
-### 6. Open it
+### 7. Open it
 
 ```bash
 xdg-open nvda_dashboard.html
@@ -265,6 +299,25 @@ The base case is illustrative, not analyst consensus:
 Adjust the constants in `nvda_dashboard.py` (`G_REV`, `GM_TARGET`, `OPEX_GROWTH`, etc.) to test
 other scenarios.
 
+### Valuation
+
+The **Valuation** tab combines three views:
+
+- **Relative valuation:** 35–45x P/E, 30–40x EV/EBITDA and 40–50x P/FCF. The fair value range is
+  **$165.25–$220.50** and the base is **$194.21** (40x P/E and 35x EV/EBITDA).
+- **Conservative FCFF DCF:** 10-year explicit forecast with revenue growth fading from 18% to 3%,
+  EBIT margin fading from 58% to 50%, 21% tax, D&A 1.5% of revenue, capex 3.0%, ΔNWC 12% of ΔRevenue,
+  and a 13.8% WACC. Bear/base/bull values are **$35.26 / $52.22 / $76.18** per share. This is a
+  downside anchor, not the primary target.
+- **Reverse DCF:** at a 13.8% WACC, the current $217.94 price requires about **12.6% perpetual
+  terminal growth**; at 3.0% terminal growth, it requires about a **5.6% WACC**. Both are aggressive.
+
+At the 2026-10-27 close of **$217.94**, the model verdict is **modestly overvalued**: the price is
+about **10.9% above** the fair value base and near the top of the relative range. The base is the
+central fair value; the low end of the range is the margin-of-safety reference. The dashboard shows
+the football-field chart, DCF scenarios, relative multiples and reverse-DCF table. These are
+model-implied values, not investment advice.
+
 ### Units
 
 - Tables: **USD millions**
@@ -275,7 +328,7 @@ other scenarios.
 
 ## Validation
 
-`fetch_sec_nvda.py` runs these nine checks before writing the dataset:
+`fetch_sec_nvda.py` runs these twelve checks before writing the dataset:
 
 - Five complete fiscal years for the key series.
 - `Assets = Liabilities + Equity`.
@@ -283,6 +336,10 @@ other scenarios.
 - Segment revenue sums to total revenue.
 - `CFO + CFI + CFF = Change in cash`.
 - Other current and non-current assets are non-negative.
+- Non-current asset components reconcile (operating leases + deferred tax + other assets, with
+  non-marketable equity separate where applicable).
+- Current liabilities reconcile (accounts payable + accrued liabilities + current debt).
+- Non-current liability components reconcile (debt + operating leases + other long-term liabilities).
 - Financial debt tags (current and non-current) are present.
 - Interest expense is present.
 - Market capitalization is available.
@@ -312,7 +369,7 @@ google-chrome --headless=new --no-sandbox --disable-gpu \
   > /tmp/nvda_dom.html
 ```
 
-Expected result: twelve Plotly containers (`chart1`–`chart11` plus `chart4b`), no JavaScript
+Expected result: thirteen Plotly containers (`chart1`–`chart12` plus `chart4b`), no JavaScript
 errors, and no external `<script src>` or `<link href>` resources.
 
 ---
@@ -429,19 +486,26 @@ repository root.
   each fiscal year-end.
 - Customer concentration (two customers = 22% + 14% of FY2026 revenue) and geographic revenue
   (31% outside the US) come from the FY2026 10-K narrative, not from the XBRL companyfacts dataset.
-- Other current/non-current assets and liabilities are derived residuals. Individual component tags
-  (operating leases, deferred tax, non-marketable equity, etc.) are not separately validated, so a
-  mis-mapped component could be absorbed into “Other” rather than surfaced.
+- Other current assets are derived from the current-assets total. Non-current asset and liability
+  components are validated in the Financial Statements tab; non-marketable equity is included in
+  “Other assets” in FY2022–FY2024 and separate in FY2025–FY2026.
 - The embedded plotly.js version depends on the pinned Plotly version (`7.1.0`). Changing the
   dependency changes the HTML hash and may change chart rendering.
+- The valuation uses the committed `data/nvda_price.csv` (2026-10-27 close). Refresh it manually
+  with `fetch_nvda_price.py`; the dashboard does not fetch live prices at render time.
+- Relative multiples are reference ranges, not live peer medians. The DCF is deliberately
+  conservative and highly sensitive to WACC, terminal growth and margin assumptions.
 - The dashboard is an analytical tool, **not investment advice**.
 
 ---
 
 ## License
 
-No license has been selected yet. Add a `LICENSE` file before distributing the project if you want
-to grant reuse rights.
+- **Code** (Python scripts): MIT License, see [`LICENSE`](LICENSE).
+- **Dashboard, README and other content**: Creative Commons Attribution 4.0 International
+  (CC BY 4.0), see [`LICENSE-CONTENT.md`](LICENSE-CONTENT.md).
+- **Data**: SEC filings and XBRL data are public. NVIDIA and the NVIDIA logo are trademarks of
+  NVIDIA Corporation; this project is independent and not affiliated with NVIDIA.
 
 ---
 
