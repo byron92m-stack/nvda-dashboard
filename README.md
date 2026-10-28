@@ -5,8 +5,9 @@ official **SEC XBRL** data. It covers five fiscal years, from **FY2022** (ended 
 to **FY2026** (ended January 25, 2026), and runs entirely in the browser with no server, database
 or internet connection.
 
-**Live demo:** `https://byron92m-stack.github.io/nvda-dashboard/`  
-*(available after GitHub Pages is enabled; see [Publishing](#publishing-the-dashboard))*
+**Live demo:** [https://byron92m-stack.github.io/nvda-dashboard/](https://byron92m-stack.github.io/nvda-dashboard/)
+
+The root URL redirects to the self-contained dashboard via `index.html`.
 
 ---
 
